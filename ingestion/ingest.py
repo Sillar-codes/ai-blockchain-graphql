@@ -40,6 +40,10 @@ def save_transaction(tx, driver, timestamp):
     tx_hash = tx['hash'].hex()
     value = tx['value']
     block_number = tx['blockNumber']
+    gas = tx['gas']
+    gas_price = tx['gasPrice']
+    nonce = tx['nonce']
+    transaction_index = tx['transactionIndex']
 
     with driver.session() as session:
         session.run("""
@@ -48,7 +52,12 @@ def save_transaction(tx, driver, timestamp):
         CREATE (from)-[:SENT {
             hash: $hash,
             value: $value,
-            block: $block_number
+            block: $block_number,
+            timestamp: $timestamp,
+            gas: $gas,
+            gas_price: $gas_price,
+            nonce: $nonce,
+            transaction_index: $transaction_index
         }]->(to)
         """, {
             "from": from_addr,
@@ -56,7 +65,11 @@ def save_transaction(tx, driver, timestamp):
             "hash": tx_hash,
             "value": str(value),        # Store value as string!
             "block_number": block_number,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "gas": gas,
+            "gas_price": gas_price,
+            "nonce": nonce,
+            "transaction_index": transaction_index
         })
 
 def main():
