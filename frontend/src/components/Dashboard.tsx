@@ -1,362 +1,459 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext'
-import { Item, ItemRequest } from '../types/item'
-import { itemService } from '../services/api'
-import { ItemForm } from './ItemForm'
-import { isAxiosError } from 'axios'
-import ItemList from './ItemList'
-import { ConfirmModal, Modal } from './Modal'
+import { blockchainService } from '@/services/api'
 
-import RefreshIcon from '../assets/svg/refresh.svg'
-import LogoutIcon from '../assets/svg/logout.svg'
-import CheckIcon from '../assets/svg/check.svg'
-import ErrorIcon from '../assets/svg/error.svg'
+interface Message {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: Date
+}
 
 export const Dashboard: React.FC = () => {
-  const [items, setItems] = useState<Item[]>([])
-  const [loading, setLoading] = useState<boolean>(true)
-  const [error, setError] = useState<string>('')
-  const [showFormModal, setShowFormModal] = useState<boolean>(false)
-  const [editingItem, setEditingItem] = useState<Item | null>(null)
-  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; itemId: string | null }>({
-    isOpen: false,
-    itemId: null
-  })
-  const [successMessage, setSuccessMessage] = useState<string>('')
+  const [messages, setMessages] = useState<Message[]>([])
+  const [input, setInput] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { user, signOut } = useAuth()
 
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   useEffect(() => {
-    loadItems()
-  }, [])
+    scrollToBottom()
+  }, [messages])
 
-  const showSuccess = (message: string) => {
-    setSuccessMessage(message)
-    setTimeout(() => setSuccessMessage(''), 3000)
-  }
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+    }
+  }, [input])
 
-  const loadItems = async (): Promise<void> => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading) return
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input.trim(),
+      timestamp: new Date()
+    }
+
+    setMessages(prev => [...prev, userMessage])
+    setInput('')
+    setIsLoading(true)
+
     try {
-      setLoading(true)
-      const data = await itemService.listItems()
-      setItems(data)
-      setError('')
-    } catch (err) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message || 'An error occurred')
-      } else {
-        setError('Failed to load items. Please check if you are authenticated.')
+      // Replace with your actual API call
+      const { data } = await blockchainService.sendPrompt(input.trim())
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: data.naturalLanguageExplanation || 'Sorry, I could not process your request.',
+        timestamp: new Date()
       }
-      console.error('Error loading items:', err)
+
+      setMessages(prev => [...prev, assistantMessage])
+    } catch (error) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: 'Sorry, there was an error processing your request. Please try again.',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, errorMessage])
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
   }
 
-  const handleNewProduct = () => {
-    setEditingItem(null)
-    setShowFormModal(true)
+  const handleNewChat = () => {
+    setMessages([])
   }
 
-  const handleCreateItem = async (data: ItemRequest): Promise<void> => {
+  const handleSignOut = async () => {
     try {
-      const newItem = await itemService.createItem(data)
-      setItems(prev => [...prev, newItem])
-      setShowFormModal(false)
-      setError('')
-      showSuccess('Product created successfully! 🎉')
-    } catch (err: unknown) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to create item')
-      } else {
-        setError('Failed to create item')
-      }
-      console.error('Error creating item:', err)
+      await signOut()
+    } catch (error) {
+      console.error('Failed to sign out:', error)
     }
-  }
-
-  const handleUpdateItem = async (data: ItemRequest): Promise<void> => {
-    if (!editingItem) return
-
-    try {
-      const updatedItem = await itemService.updateItem(editingItem.itemId, data)
-      setItems(prev => prev.map(item => (item.itemId === editingItem.itemId ? updatedItem : item)))
-      setEditingItem(null)
-      setShowFormModal(false)
-      setError('')
-      showSuccess('Product updated successfully! ✨')
-    } catch (err: unknown) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to update item')
-      } else {
-        setError('Failed to update item')
-      }
-      console.error('Error updating item:', err)
-    }
-  }
-
-  const handleDeleteItem = async (id: string): Promise<void> => {
-    try {
-      await itemService.deleteItem(id)
-      setItems(prev => prev.filter(item => item.itemId !== id))
-      setError('')
-      setDeleteModal({ isOpen: false, itemId: null })
-      showSuccess('Product deleted successfully! 🗑️')
-    } catch (err: unknown) {
-      if (isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Failed to delete item')
-      } else {
-        setError('Failed to delete item')
-      }
-      console.error('Error deleting item:', err)
-      setDeleteModal({ isOpen: false, itemId: null })
-    }
-  }
-
-  const confirmDelete = (id: string): void => {
-    setDeleteModal({ isOpen: true, itemId: id })
-  }
-
-  const handleEdit = (item: Item): void => {
-    setEditingItem(item)
-    setShowFormModal(true)
-  }
-
-  const handleCancel = (): void => {
-    setShowFormModal(false)
-  }
-
-  const handleRefresh = (): void => {
-    loadItems()
-    showSuccess('Products refreshed! 🔄')
   }
 
   return (
-    <div className='min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 relative overflow-hidden'>
-      {/* Simplified Animated Background Elements */}
-      <div className='absolute inset-0 overflow-hidden'>
-        <div className='absolute -top-40 -right-40 w-80 h-80 bg-blue-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-1000'></div>
-        <div className='absolute -bottom-40 -left-40 w-80 h-80 bg-purple-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-pulse animation-delay-2000'></div>
+    <div className='flex h-screen bg-gray-950 text-gray-100 overflow-hidden'>
+      {/* Animated Background */}
+      <div className='fixed inset-0 overflow-hidden pointer-events-none'>
+        <div className='absolute top-0 left-1/4 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl animate-float' />
+        <div className='absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl animate-float-delayed' />
+        <div className='absolute top-1/2 left-1/2 w-72 h-72 bg-violet-600/10 rounded-full blur-3xl animate-float-slow' />
       </div>
 
-      {/* Header with Enhanced Gradient */}
-      <header className='relative bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 shadow-2xl'>
-        <div className='container mx-auto px-4 py-6'>
-          <div className='flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0'>
-            <div className='text-center sm:text-left'>
-              <h1 className='text-4xl font-bold text-white drop-shadow-lg bg-gradient-to-r from-white to-blue-100 bg-clip-text text-transparent'>
-                Product Inventory Manager
-              </h1>
-              <p className='text-blue-100 mt-2 flex items-center justify-center sm:justify-start space-x-2'>
-                <span className='w-3 h-3 bg-green-400 rounded-full animate-ping'></span>
-                <span>Welcome back, {user?.name}!</span>
-              </p>
-            </div>
-            <div className='flex space-x-3'>
-              <button
-                onClick={handleRefresh}
-                disabled={loading}
-                className='bg-white/20 backdrop-blur-lg text-white px-6 py-3 rounded-xl hover:bg-white/30 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:transform-none flex items-center space-x-2 border border-white/30 hover:shadow-lg'
-              >
-                <div className='w-5 h-5 animate-spin-slow'>
-                  <RefreshIcon />
-                </div>
-                <span>Refresh</span>
-              </button>
-              <button
-                onClick={signOut}
-                className='bg-red-500/90 backdrop-blur-lg text-white px-6 py-3 rounded-xl hover:bg-red-600 transition-all duration-300 transform hover:scale-105 flex items-center space-x-2 border border-red-400/50 hover:shadow-lg'
-              >
-                <div className='w-5 h-5'>
-                  <LogoutIcon />
-                </div>
-                <span>Sign Out</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <div className='relative container mx-auto px-4 py-8'>
-        {/* Enhanced Success Message */}
-        {successMessage && (
-          <div
-            className='mb-6 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-4 rounded-2xl shadow-lg transform animate-in slide-in-from-top duration-500 hover:scale-105 transition-transform cursor-pointer'
-            onClick={() => setSuccessMessage('')}
-          >
-            <div className='flex items-center justify-between'>
-              <div className='flex items-center space-x-3'>
-                <div className='bg-white/20 rounded-full p-2 animate-bounce'>
-                  <div className='w-6 h-6'>
-                    <CheckIcon />
-                  </div>
-                </div>
-                <span className='font-semibold text-lg'>{successMessage}</span>
-              </div>
-              <button className='hover:text-green-200 transition-colors transform hover:scale-110'>
-                <svg className='w-5 h-5' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                  <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M6 18L18 6M6 6l12 12' />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Enhanced Error Message */}
-        {error && (
-          <div
-            className='mb-6 bg-gradient-to-r from-red-500 to-pink-600 text-white px-6 py-4 rounded-2xl shadow-lg transform animate-in slide-in-from-top duration-500 hover:scale-105 transition-transform cursor-pointer'
-            onClick={() => setError('')}
-          >
-            <div className='flex items-center justify-between'>
-              <div className='flex items-center space-x-3'>
-                <div className='bg-white/20 rounded-full p-2 animate-pulse'>
-                  <div className='w-6 h-6'>
-                    <ErrorIcon />
-                  </div>
-                </div>
-                <span className='font-semibold text-lg'>{error}</span>
-              </div>
-              <button className='hover:text-red-200 transition-colors transform hover:scale-110'>
-                <svg className='w-5 h-5' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                  <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M6 18L18-6M6 6l12 12' />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Enhanced Stats Cards */}
-        <div className='grid grid-cols-1 md:grid-cols-3 gap-6 mb-8'>
-          <div className='group relative'>
-            <div className='absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-2xl blur opacity-25 group-hover:opacity-75 transition duration-1000 group-hover:duration-200' />
-            <div className='relative bg-white/80 backdrop-blur-lg rounded-2xl p-6 shadow-xl border border-white/20 transform hover:scale-105 transition-all duration-300'>
-              <div className='flex items-center justify-between'>
-                <div>
-                  <p className='text-gray-600 text-sm font-medium'>Total Products</p>
-                  <p className='text-3xl font-bold text-gray-800 mt-2'>{items.length}</p>
-                </div>
-                <div className='p-3 bg-blue-100 rounded-xl group-hover:scale-110 transition-transform duration-300'>
-                  <svg className='w-8 h-8 text-blue-600' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                    <path
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      strokeWidth={2}
-                      d='M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className='group relative'>
-            <div className='absolute inset-0 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl blur opacity-25 group-hover:opacity-75 transition duration-1000 group-hover:duration-200' />
-            <div className='relative bg-white/80 backdrop-blur-lg rounded-2xl p-6 shadow-xl border border-white/20 transform hover:scale-105 transition-all duration-300'>
-              <div className='flex items-center justify-between'>
-                <div>
-                  <p className='text-gray-600 text-sm font-medium'>Total Value</p>
-                  <p className='text-3xl font-bold text-gray-800 mt-2'>
-                    ${items.reduce((sum, item) => sum + item.price, 0).toFixed(2)}
-                  </p>
-                </div>
-                <div className='p-3 bg-green-100 rounded-xl group-hover:scale-110 transition-transform duration-300'>
-                  <svg className='w-8 h-8 text-green-600' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                    <path
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      strokeWidth={2}
-                      d='M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className='group relative'>
-            <div className='absolute inset-0 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl blur opacity-25 group-hover:opacity-75 transition duration-1000 group-hover:duration-200' />
-            <div className='relative bg-white/80 backdrop-blur-lg rounded-2xl p-6 shadow-xl border border-white/20 transform hover:scale-105 transition-all duration-300'>
-              <div className='flex items-center justify-between'>
-                <div>
-                  <p className='text-gray-600 text-sm font-medium'>Categories</p>
-                  <p className='text-3xl font-bold text-gray-800 mt-2'>
-                    {new Set(items.map(item => item.category)).size}
-                  </p>
-                </div>
-                <div className='p-3 bg-purple-100 rounded-xl group-hover:scale-110 transition-transform duration-300'>
-                  <svg className='w-8 h-8 text-purple-600' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                    <path
-                      strokeLinecap='round'
-                      strokeLinejoin='round'
-                      strokeWidth={2}
-                      d='M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z'
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Enhanced Action Bar */}
-        <div className='flex flex-col sm:flex-row justify-between items-center mb-8 space-y-4 sm:space-y-0'>
-          <div className='text-center sm:text-left'>
-            <h2 className='text-4xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent animate-pulse'>
-              Product Inventory
-            </h2>
-            <p className='text-gray-600 mt-2 text-lg'>Manage your products with ease and style</p>
-          </div>
+      {/* Sidebar */}
+      <aside
+        className={`${
+          isSidebarOpen ? 'w-64' : 'w-0'
+        } bg-gray-900/50 backdrop-blur-xl border-r border-gray-800/50 transition-all duration-300 flex flex-col relative z-10 overflow-hidden`}
+      >
+        <div className='p-4 border-b border-gray-800/50'>
           <button
-            onClick={handleNewProduct}
-            className='relative bg-gradient-to-r from-green-500 to-emerald-600 text-white px-8 py-4 rounded-2xl hover:from-green-600 hover:to-emerald-700 transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center space-x-3 font-semibold group overflow-hidden'
+            onClick={handleNewChat}
+            className='w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 group shadow-lg hover:shadow-xl transform hover:scale-[1.02]'
           >
-            <div className='absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -skew-x-12 transform translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000' />
-            <svg className='w-6 h-6 relative z-10' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+            <svg
+              className='w-5 h-5 group-hover:rotate-90 transition-transform duration-300'
+              fill='none'
+              stroke='currentColor'
+              viewBox='0 0 24 24'
+            >
               <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M12 4v16m8-8H4' />
             </svg>
-            <span className='relative z-10'>Add New Product</span>
+            New Chat
           </button>
         </div>
 
-        {/* Content Area */}
-        {loading ? (
-          <div className='text-center py-16'>
-            <div className='inline-block animate-spin rounded-full h-16 w-16 border-4 border-blue-600 border-t-transparent'></div>
-            <p className='mt-4 text-gray-600 text-lg animate-pulse'>Loading your products...</p>
+        <div className='flex-1 overflow-y-auto p-4 space-y-2'>
+          <div className='text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3'>Recent Chats</div>
+          {/* Chat history items would go here */}
+          <div className='space-y-2'>
+            {[1, 2, 3].map(i => (
+              <button
+                key={i}
+                className='w-full text-left py-3 px-4 rounded-xl bg-gray-800/30 hover:bg-gray-800/50 text-gray-400 hover:text-gray-200 transition-all duration-200 text-sm truncate group'
+              >
+                <div className='flex items-center gap-2'>
+                  <svg
+                    className='w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth={2}
+                      d='M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z'
+                    />
+                  </svg>
+                  Previous conversation {i}
+                </div>
+              </button>
+            ))}
           </div>
-        ) : (
-          <div className='transform animate-in fade-in duration-700'>
-            <ItemList items={items} onEdit={handleEdit} onDelete={confirmDelete} />
+        </div>
+
+        <div className='p-4 border-t border-gray-800/50'>
+          <div className='text-xs text-gray-500 text-center'>
+            <p>Powered by AI</p>
           </div>
-        )}
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className='flex-1 flex flex-col relative z-10'>
+        {/* Header */}
+        <header className='bg-gray-900/50 backdrop-blur-xl border-b border-gray-800/50 px-6 py-4 flex items-center justify-between shadow-lg'>
+          <div className='flex items-center gap-4'>
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className='p-2 hover:bg-gray-800/50 rounded-xl transition-all duration-200 group'
+            >
+              <svg
+                className='w-6 h-6 text-gray-400 group-hover:text-gray-200 transition-colors'
+                fill='none'
+                stroke='currentColor'
+                viewBox='0 0 24 24'
+              >
+                <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M4 6h16M4 12h16M4 18h16' />
+              </svg>
+            </button>
+            <div className='flex items-center gap-3'>
+              <div className='w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg'>
+                <svg className='w-6 h-6 text-white' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                  <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M13 10V3L4 14h7v7l9-11h-7z' />
+                </svg>
+              </div>
+              <div>
+                <h1 className='text-xl font-bold text-gray-100'>Transaction Analyzer</h1>
+                <p className='text-xs text-gray-500'>Your intelligent companion</p>
+              </div>
+            </div>
+          </div>
+
+          <div className='flex items-center gap-4'>
+            {/* User Profile */}
+            <div className='flex items-center gap-3 px-4 py-2 bg-gray-800/30 rounded-xl border border-gray-700/50'>
+              <div className='w-8 h-8 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-lg flex items-center justify-center text-white font-semibold text-sm shadow-lg'>
+                {user?.name?.charAt(0).toUpperCase() || 'U'}
+              </div>
+              <div className='hidden sm:block'>
+                <p className='text-sm font-medium text-gray-200'>{user?.name || 'User'}</p>
+                <p className='text-xs text-gray-500'>{user?.email || 'user@example.com'}</p>
+              </div>
+            </div>
+
+            {/* Sign Out Button */}
+            <button
+              onClick={handleSignOut}
+              className='px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 hover:text-red-300 rounded-xl font-medium transition-all duration-200 flex items-center gap-2 border border-red-600/30 group'
+            >
+              <svg
+                className='w-5 h-5 group-hover:translate-x-1 transition-transform'
+                fill='none'
+                stroke='currentColor'
+                viewBox='0 0 24 24'
+              >
+                <path
+                  strokeLinecap='round'
+                  strokeLinejoin='round'
+                  strokeWidth={2}
+                  d='M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1'
+                />
+              </svg>
+              <span className='hidden sm:inline'>Sign Out</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Messages Area */}
+        <div className='flex-1 overflow-y-auto px-4 py-6'>
+          <div className='max-w-4xl mx-auto space-y-6'>
+            {messages.length === 0 ? (
+              <div className='flex flex-col items-center justify-center h-full py-12'>
+                <div className='w-20 h-20 bg-gradient-to-br from-blue-500/20 to-indigo-600/20 rounded-2xl flex items-center justify-center mb-6 backdrop-blur-xl border border-gray-700/50 shadow-xl animate-pulse'>
+                  <svg className='w-10 h-10 text-blue-400' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                    <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M13 10V3L4 14h7v7l9-11h-7z' />
+                  </svg>
+                </div>
+                <h2 className='text-2xl font-bold text-gray-300 mb-2'>How can I help you today?</h2>
+                <p className='text-gray-500 text-center max-w-md'>Start a conversation by typing a message below</p>
+
+                {/* Suggestion Cards */}
+                <div className='grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 w-full max-w-2xl'>
+                  {[
+                    { icon: '💡', title: 'About Me', desc: 'Who are you?' },
+                    { icon: '📝', title: 'What is Ethereum', desc: 'What is Ethereum?' },
+                    {
+                      icon: '🔍',
+                      title: 'Research',
+                      desc: 'Are addresses 0xD5b1... and 0x52e0... related with each other?'
+                    },
+                    {
+                      icon: '🎨',
+                      title: 'List Transactions',
+                      desc: 'List all transactions involving 0xE2f3... greater than 10 ETH in the last month.'
+                    }
+                  ].map((item, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setInput(item.desc)}
+                      className='p-4 bg-gray-800/30 hover:bg-gray-800/50 backdrop-blur-xl rounded-2xl border border-gray-700/50 text-left transition-all duration-200 hover:scale-[1.02] hover:shadow-xl group'
+                    >
+                      <div className='text-2xl mb-2 group-hover:scale-110 transition-transform'>{item.icon}</div>
+                      <h3 className='font-semibold text-gray-200 mb-1'>{item.title}</h3>
+                      <p className='text-sm text-gray-500'>{item.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <>
+                {messages.map((message, index) => (
+                  <div
+                    key={message.id}
+                    className={`flex gap-4 ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slideUp`}
+                    style={{ animationDelay: `${index * 0.1}s` }}
+                  >
+                    {message.role === 'assistant' && (
+                      <div className='w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg'>
+                        <svg className='w-6 h-6 text-white' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                          <path
+                            strokeLinecap='round'
+                            strokeLinejoin='round'
+                            strokeWidth={2}
+                            d='M13 10V3L4 14h7v7l9-11h-7z'
+                          />
+                        </svg>
+                      </div>
+                    )}
+
+                    <div
+                      className={`max-w-[80%] sm:max-w-[70%] ${
+                        message.role === 'user'
+                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white'
+                          : 'bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 text-gray-100'
+                      } rounded-2xl px-5 py-4 shadow-lg`}
+                    >
+                      <p className='text-sm leading-relaxed whitespace-pre-wrap'>{message.content}</p>
+                      <p className={`text-xs mt-2 ${message.role === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>
+                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+
+                    {message.role === 'user' && (
+                      <div className='w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-xl flex items-center justify-center flex-shrink-0 text-white font-semibold shadow-lg'>
+                        {user?.name?.charAt(0).toUpperCase() || 'U'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {isLoading && (
+                  <div className='flex gap-4 justify-start animate-slideUp'>
+                    <div className='w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg'>
+                      <svg className='w-6 h-6 text-white' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                        <path
+                          strokeLinecap='round'
+                          strokeLinejoin='round'
+                          strokeWidth={2}
+                          d='M13 10V3L4 14h7v7l9-11h-7z'
+                        />
+                      </svg>
+                    </div>
+                    <div className='bg-gray-800/50 backdrop-blur-xl border border-gray-700/50 rounded-2xl px-5 py-4 shadow-lg'>
+                      <div className='flex gap-2'>
+                        <div
+                          className='w-2 h-2 bg-blue-500 rounded-full animate-bounce'
+                          style={{ animationDelay: '0ms' }}
+                        />
+                        <div
+                          className='w-2 h-2 bg-blue-500 rounded-full animate-bounce'
+                          style={{ animationDelay: '150ms' }}
+                        />
+                        <div
+                          className='w-2 h-2 bg-blue-500 rounded-full animate-bounce'
+                          style={{ animationDelay: '300ms' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Input Area */}
+        <div className='border-t border-gray-800/50 bg-gray-900/50 backdrop-blur-xl p-4'>
+          <form onSubmit={handleSubmit} className='max-w-4xl mx-auto'>
+            <div className='relative flex items-end gap-3 bg-gray-800/50 backdrop-blur-xl rounded-2xl border border-gray-700/50 p-3 shadow-xl focus-within:border-blue-500/50 transition-all duration-200'>
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSubmit(e)
+                  }
+                }}
+                placeholder='Type your message here...'
+                rows={1}
+                className='flex-1 bg-transparent text-gray-100 placeholder-gray-500 focus:outline-none resize-none max-h-32 py-2 px-2'
+                disabled={isLoading}
+              />
+              <button
+                type='submit'
+                disabled={!input.trim() || isLoading}
+                className='p-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-gray-700 disabled:to-gray-700 text-white rounded-xl transition-all duration-200 disabled:cursor-not-allowed flex-shrink-0 shadow-lg hover:shadow-xl transform hover:scale-105 disabled:scale-100 group'
+              >
+                {isLoading ? (
+                  <div className='w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin' />
+                ) : (
+                  <svg
+                    className='w-5 h-5 group-hover:translate-x-0.5 transition-transform'
+                    fill='none'
+                    stroke='currentColor'
+                    viewBox='0 0 24 24'
+                  >
+                    <path
+                      strokeLinecap='round'
+                      strokeLinejoin='round'
+                      strokeWidth={2}
+                      d='M12 19l9 2-9-18-9 18 9-2zm0 0v-8'
+                    />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <p className='text-xs text-gray-600 text-center mt-3'>
+              Press <kbd className='px-2 py-1 bg-gray-800 rounded text-gray-400'>Enter</kbd> to send,{' '}
+              <kbd className='px-2 py-1 bg-gray-800 rounded text-gray-400'>Shift + Enter</kbd> for new line
+            </p>
+          </form>
+        </div>
       </div>
 
-      {/* Product Form Modal */}
-      <Modal
-        isOpen={showFormModal}
-        onClose={handleCancel}
-        title={editingItem ? 'Edit Product' : 'Create New Product'}
-        size='lg'
-      >
-        <ItemForm
-          item={editingItem}
-          onSubmit={editingItem ? handleUpdateItem : handleCreateItem}
-          onCancel={handleCancel}
-          isEditing={!!editingItem}
-        />
-      </Modal>
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33% { transform: translate(30px, -30px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+        
+        @keyframes float-delayed {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33% { transform: translate(-30px, 30px) scale(0.9); }
+          66% { transform: translate(20px, -20px) scale(1.1); }
+        }
+        
+        @keyframes float-slow {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50% { transform: translate(20px, 20px) scale(1.05); }
+        }
+        
+        @keyframes slideUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .animate-float {
+          animation: float 20s ease-in-out infinite;
+        }
+        
+        .animate-float-delayed {
+          animation: float-delayed 25s ease-in-out infinite;
+        }
+        
+        .animate-float-slow {
+          animation: float-slow 30s ease-in-out infinite;
+        }
+        
+        .animate-slideUp {
+          animation: slideUp 0.4s ease-out;
+        }
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmModal
-        isOpen={deleteModal.isOpen}
-        onConfirm={() => deleteModal.itemId && handleDeleteItem(deleteModal.itemId)}
-        onCancel={() => setDeleteModal({ isOpen: false, itemId: null })}
-        title='Confirm Deletion'
-        message='Are you sure you want to delete this product? This action cannot be undone.'
-        confirmText='Delete Product'
-        cancelText='Keep Product'
-      />
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+          background: rgba(17, 24, 39, 0.5);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+          background: rgba(75, 85, 99, 0.5);
+          border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+          background: rgba(107, 114, 128, 0.7);
+        }
+      `}</style>
     </div>
   )
 }
