@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { Item, ItemRequest } from '../types/item'
-import { API_BASE_URL } from '@/config'
+import { API_BASE_URL, API_GRAPHQL_URL } from '@/config'
+import { AnswerData, PromptData } from '@/types/blockchain'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -13,6 +14,7 @@ api.interceptors.request.use(config => {
   const token = localStorage.getItem('idToken')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+    config.headers['Content-Type'] = 'application/x-www-form-urlencoded'
   }
 
   return config
@@ -31,6 +33,15 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+export const blockchainService = {
+  async sendPrompt(prompt: string): Promise<AnswerData> {
+    console.log(prompt)
+    const response = await api.post<AnswerData>('/query/natural', { prompt }, { baseURL: API_GRAPHQL_URL })
+
+    return response.data
+  }
+}
 
 export const itemService = {
   async createItem(item: ItemRequest): Promise<Item> {
